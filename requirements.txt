@@ -1,0 +1,29 @@
+# Wersje zamrożone (pinned) na podstawie działającego środowiska Dev Container.
+# Python 3.11-slim. Wygenerowano z `pip freeze` wewnątrz kontenera.
+
+# --- Środowisko notatnika / jupytext ---
+jupytext==1.19.3
+ipykernel==7.2.0
+
+# --- Manipulacja danymi i obliczenia ---
+pandas==3.0.3
+numpy==2.4.6
+scikit-learn==1.9.0
+
+# --- NLP: przetwarzanie tekstu i modele ---
+spacy==3.8.14
+transformers==5.10.2
+keybert==0.9.0
+
+# --- Deep Learning (backend dla transformers) ---
+torch==2.12.0
+
+# --- Sentiment Analysis (część partnera) ---
+vaderSentiment==3.3.2
+
+# --- Pobieranie zbioru danych ---
+kagglehub==1.0.1
+
+# --- Wizualizacja ---
+matplotlib==3.10.9
+seaborn==0.13.2
