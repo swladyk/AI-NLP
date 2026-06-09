@@ -27,3 +27,11 @@ kagglehub==1.0.1
 # --- Wizualizacja ---
 matplotlib==3.10.9
 seaborn==0.13.2
+
+# --- Fine-tuning (LoRA / Trainer / metryki ROUGE) ---
+# Wersje zweryfikowane jako zgodne z transformers==5.10.2 (pip check: OK).
+peft==0.19.1
+accelerate==1.13.0
+datasets==5.0.0
+evaluate==0.4.6
+rouge_score==0.1.2

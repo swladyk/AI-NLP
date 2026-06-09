@@ -1,0 +1,105 @@
+{
+  "best_global_step": 188,
+  "best_metric": 17.23,
+  "best_model_checkpoint": "flan-t5-base-lora-finefood/checkpoint-188",
+  "epoch": 3.0,
+  "eval_steps": 500,
+  "global_step": 564,
+  "is_hyper_param_search": false,
+  "is_local_process_zero": true,
+  "is_world_process_zero": true,
+  "log_history": [
+    {
+      "epoch": 0.5319148936170213,
+      "grad_norm": 0.6583203673362732,
+      "learning_rate": 0.00016489361702127662,
+      "loss": 3.159897766113281,
+      "step": 100
+    },
+    {
+      "epoch": 1.0,
+      "eval_loss": 2.7512617111206055,
+      "eval_rouge1": 17.53,
+      "eval_rouge2": 5.19,
+      "eval_rougeL": 17.23,
+      "eval_rougeLsum": 17.24,
+      "eval_runtime": 590.7725,
+      "eval_samples_per_second": 0.677,
+      "eval_steps_per_second": 0.022,
+      "step": 188
+    },
+    {
+      "epoch": 1.0638297872340425,
+      "grad_norm": 0.7797112464904785,
+      "learning_rate": 0.0001294326241134752,
+      "loss": 3.066927490234375,
+      "step": 200
+    },
+    {
+      "epoch": 1.5957446808510638,
+      "grad_norm": 0.7081795930862427,
+      "learning_rate": 9.397163120567376e-05,
+      "loss": 3.0553240966796875,
+      "step": 300
+    },
+    {
+      "epoch": 2.0,
+      "eval_loss": 2.7412643432617188,
+      "eval_rouge1": 16.69,
+      "eval_rouge2": 4.97,
+      "eval_rougeL": 16.48,
+      "eval_rougeLsum": 16.46,
+      "eval_runtime": 283.6302,
+      "eval_samples_per_second": 1.41,
+      "eval_steps_per_second": 0.046,
+      "step": 376
+    },
+    {
+      "epoch": 2.127659574468085,
+      "grad_norm": 0.7284529805183411,
+      "learning_rate": 5.851063829787234e-05,
+      "loss": 3.0095425415039063,
+      "step": 400
+    },
+    {
+      "epoch": 2.6595744680851063,
+      "grad_norm": 0.847576379776001,
+      "learning_rate": 2.3049645390070924e-05,
+      "loss": 3.014598388671875,
+      "step": 500
+    },
+    {
+      "epoch": 3.0,
+      "eval_loss": 2.7388803958892822,
+      "eval_rouge1": 16.54,
+      "eval_rouge2": 4.72,
+      "eval_rougeL": 16.24,
+      "eval_rougeLsum": 16.19,
+      "eval_runtime": 279.4837,
+      "eval_samples_per_second": 1.431,
+      "eval_steps_per_second": 0.047,
+      "step": 564
+    }
+  ],
+  "logging_steps": 100,
+  "max_steps": 564,
+  "num_input_tokens_seen": 0,
+  "num_train_epochs": 3,
+  "save_steps": 500,
+  "stateful_callbacks": {
+    "TrainerControl": {
+      "args": {
+        "should_epoch_stop": false,
+        "should_evaluate": false,
+        "should_log": false,
+        "should_save": true,
+        "should_training_stop": true
+      },
+      "attributes": {}
+    }
+  },
+  "total_flos": 4355927725547520.0,
+  "train_batch_size": 16,
+  "trial_name": null,
+  "trial_params": null
+}

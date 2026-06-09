@@ -558,6 +558,265 @@ print("Open it in Excel: columns are original_text | bart_summary | keywords for
 
 ---
 
+#### 6.3.2 Fine-tuning a small model with LoRA — base vs fine-tuned
+
+So far we summarized reviews with a **large, zero-shot** model (Flan-T5 XL). In
+this experiment we take the opposite approach: a **small** model
+(`google/flan-t5-base`, 250M) and **fine-tune** it on this dataset, then compare
+the summaries it produces *before* and *after* fine-tuning.
+
+**Supervised signal.** The Amazon Fine Food Reviews dataset ships with a
+`Summary` column — the reviewer's own short **headline** (e.g. *"Great taste!"*,
+*"Not worth the money"*). These are noisy and very short, so we use them as a
+ready-made reference target for the task `review Text -> Summary headline`. We
+clean them (keep 2–15 word headlines, drop duplicates) and hold out a test set
+on which we measure **ROUGE** for the base vs the fine-tuned model.
+
+**Method.** We use **LoRA** (PEFT): the base weights stay frozen and we train
+only small low-rank adapters (`r=16`). This gives a clean A/B comparison — the
+*same* base model, with the adapter **disabled** (= base) or **enabled**
+(= fine-tuned) — and trains in minutes on a single GPU.
+
+```python
+import csv
+import numpy as np
+import torch
+from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    Seq2SeqTrainingArguments,
+    Seq2SeqTrainer,
+    DataCollatorForSeq2Seq,
+)
+from peft import LoraConfig, get_peft_model, TaskType
+import evaluate
+
+FT_MODEL = "google/flan-t5-base"
+SUMM_PREFIX = "summarize: "          # T5 summarization convention
+MAX_SOURCE, MAX_TARGET = 512, 32
+# Mniejszy zbiór = szybki trening (kilka minut na GPU). Można zwiększyć, jeśli
+# masz czas. UWAGA: ETA na pasku postępu jest zawyżone na pierwszych krokach
+# (lazy-init CUDA / kompilacja kerneli) — realna prędkość ustala się po ~20-30 krokach.
+N_TRAIN, N_VAL, N_TEST = 3000, 400, 400
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print("Device:", device)
+```
+
+```python
+# --- Build the fine-tuning corpus from the FULL dataset (not just df_sample) ---
+ft_df = df[(df["word_count"] >= MIN_WORDS) & (df["word_count"] <= MAX_WORDS)].copy()
+
+# Clean the reference headlines (the 'Summary' column)
+ft_df["Summary"] = ft_df["Summary"].astype(str).str.strip()
+ft_df["summary_wc"] = ft_df["Summary"].str.split().str.len()
+ft_df = ft_df[(ft_df["summary_wc"] >= 2) & (ft_df["summary_wc"] <= 15)]
+ft_df = ft_df.drop_duplicates(subset=["Text"])
+
+# Avoid leakage: drop reviews already used in the qualitative df_sample (by Id)
+ft_df = ft_df[~ft_df["Id"].isin(df_sample["Id"])]
+
+# Shuffle and split
+ft_df = ft_df.sample(frac=1.0, random_state=RANDOM_STATE).reset_index(drop=True)
+assert len(ft_df) >= N_TRAIN + N_VAL + N_TEST, f"Za mało danych po filtrze: {len(ft_df)}"
+
+train_df = ft_df.iloc[:N_TRAIN]
+val_df = ft_df.iloc[N_TRAIN:N_TRAIN + N_VAL]
+test_df = ft_df.iloc[N_TRAIN + N_VAL:N_TRAIN + N_VAL + N_TEST]
+print(f"train={len(train_df)}  val={len(val_df)}  test={len(test_df)}")
+```
+
+```python
+# --- Tokenization ---
+ft_tokenizer = AutoTokenizer.from_pretrained(FT_MODEL)
+
+
+def to_dataset(frame):
+    return Dataset.from_dict({
+        "text": (SUMM_PREFIX + frame["Text"].astype(str)).tolist(),
+        "summary": frame["Summary"].astype(str).tolist(),
+    })
+
+
+def preprocess(batch):
+    model_inputs = ft_tokenizer(batch["text"], max_length=MAX_SOURCE, truncation=True)
+    labels = ft_tokenizer(text_target=batch["summary"], max_length=MAX_TARGET, truncation=True)
+    model_inputs["labels"] = labels["input_ids"]
+    return model_inputs
+
+
+train_ds = to_dataset(train_df).map(preprocess, batched=True, remove_columns=["text", "summary"])
+val_ds = to_dataset(val_df).map(preprocess, batched=True, remove_columns=["text", "summary"])
+len(train_ds), len(val_ds)
+```
+
+```python
+# --- Load base model and wrap with LoRA ---
+# Load in fp32; mixed precision (fp16) is handled by the Trainer (AMP), which
+# keeps stable fp32 master weights — safer than training fp16 weights directly.
+ft_model = AutoModelForSeq2SeqLM.from_pretrained(FT_MODEL)
+
+lora_config = LoraConfig(
+    task_type=TaskType.SEQ_2_SEQ_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=["q", "v"],   # attention query/value projections in T5
+)
+ft_model = get_peft_model(ft_model, lora_config)
+ft_model.print_trainable_parameters()   # zwykle <1% parametrów
+```
+
+```python
+# --- ROUGE metric + Trainer ---
+rouge = evaluate.load("rouge")
+data_collator = DataCollatorForSeq2Seq(ft_tokenizer, model=ft_model)
+
+
+def compute_metrics(eval_preds):
+    preds, labels = eval_preds
+    if isinstance(preds, tuple):
+        preds = preds[0]
+    preds = np.where(preds != -100, preds, ft_tokenizer.pad_token_id)
+    labels = np.where(labels != -100, labels, ft_tokenizer.pad_token_id)
+    decoded_preds = ft_tokenizer.batch_decode(preds, skip_special_tokens=True)
+    decoded_labels = ft_tokenizer.batch_decode(labels, skip_special_tokens=True)
+    result = rouge.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
+    return {k: round(v * 100, 2) for k, v in result.items()}
+
+
+training_args = Seq2SeqTrainingArguments(
+    output_dir="flan-t5-base-lora-finefood",
+    learning_rate=2e-4,                 # LoRA toleruje wyższy LR niż pełny FT
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=32,
+    num_train_epochs=3,
+    eval_strategy="epoch",
+    save_strategy="epoch",
+    logging_steps=100,
+    predict_with_generate=True,
+    generation_max_length=MAX_TARGET,
+    generation_num_beams=1,             # greedy podczas ewaluacji = szybciej
+    # UWAGA: T5/Flan-T5 jest niestabilny w fp16 (overflow -> NaN/CUDA error).
+    # Używamy bf16 (ten sam zakres co fp32), natywnie wspierany przez Blackwell.
+    bf16=torch.cuda.is_available(),
+    load_best_model_at_end=True,
+    metric_for_best_model="rougeL",
+    report_to="none",
+)
+
+trainer = Seq2SeqTrainer(
+    model=ft_model,
+    args=training_args,
+    train_dataset=train_ds,
+    eval_dataset=val_ds,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+    processing_class=ft_tokenizer,
+)
+
+trainer.train()
+```
+
+```python
+# Zapis adaptera LoRA (lekki — tylko wagi adaptera, nie cały model)
+ADAPTER_DIR = "flan-t5-base-lora-finefood/adapter"
+ft_model.save_pretrained(ADAPTER_DIR)
+print("Saved LoRA adapter to", ADAPTER_DIR)
+```
+
+```python
+# --- Generate summaries on the held-out test set: base vs fine-tuned ---
+# Dzięki LoRA mamy JEDEN model: z wyłączonym adapterem = base (zero-shot),
+# z włączonym = fine-tuned. To gwarantuje uczciwe porównanie A/B.
+ft_model.to(device)
+ft_model.eval()
+
+
+@torch.no_grad()
+def generate_summary(text, num_beams=4):
+    inputs = ft_tokenizer(
+        SUMM_PREFIX + str(text),
+        max_length=MAX_SOURCE,
+        truncation=True,
+        return_tensors="pt",
+    ).to(device)
+    ids = ft_model.generate(
+        **inputs,
+        max_length=MAX_TARGET,
+        num_beams=num_beams,
+        no_repeat_ngram_size=3,
+    )
+    return ft_tokenizer.decode(ids[0], skip_special_tokens=True)
+
+
+rows = []
+for i, (_, r) in enumerate(test_df.iterrows()):
+    text = r["Text"]
+    with ft_model.disable_adapter():        # adapter OFF -> zachowanie modelu bazowego
+        base_sum = generate_summary(text)
+    ft_sum = generate_summary(text)         # adapter ON -> model po fine-tuningu
+    rows.append({
+        "reference": r["Summary"],
+        "base_summary": base_sum,
+        "finetuned_summary": ft_sum,
+        "original_text": text,
+    })
+    if (i + 1) % 100 == 0:
+        print(f"Generated {i + 1}/{len(test_df)}")
+
+compare_df = pd.DataFrame(rows)
+compare_df[["reference", "base_summary", "finetuned_summary"]].head(10)
+```
+
+```python
+# --- Quantitative comparison: ROUGE vs the reference headline ---
+base_scores = rouge.compute(
+    predictions=compare_df["base_summary"].tolist(),
+    references=compare_df["reference"].tolist(),
+    use_stemmer=True,
+)
+ft_scores = rouge.compute(
+    predictions=compare_df["finetuned_summary"].tolist(),
+    references=compare_df["reference"].tolist(),
+    use_stemmer=True,
+)
+
+score_table = pd.DataFrame({
+    "base (zero-shot)": {k: round(v * 100, 2) for k, v in base_scores.items()},
+    "fine-tuned (LoRA)": {k: round(v * 100, 2) for k, v in ft_scores.items()},
+})
+score_table
+```
+
+```python
+# --- Plot + export side-by-side comparison to Excel-friendly CSV ---
+ax = score_table.T.plot(kind="bar", figsize=(9, 5))
+ax.set_title("ROUGE: base vs fine-tuned (LoRA) — review Text -> Summary")
+ax.set_ylabel("ROUGE (%)")
+plt.xticks(rotation=0)
+plt.legend(title="metric")
+plt.tight_layout()
+plt.show()
+
+compare_df.to_csv(
+    "finetune_comparison.csv",
+    index=False,
+    encoding="utf-8-sig",
+    quoting=csv.QUOTE_ALL,
+    lineterminator="\n",
+)
+print("Saved side-by-side comparison to 'finetune_comparison.csv'.")
+```
+
+**Expected outcome.** The fine-tuned model should clearly beat the zero-shot base
+on ROUGE, because LoRA adapts it to the dataset's short, headline-style target.
+Qualitatively, the base model tends to produce generic or sentence-like outputs,
+while the fine-tuned one mimics the terse review-title style of the references.
+
+---
+
 ### Part B — Sentiment Analysis *(Partner)*
 
 > This section is a **scaffold**. The implementation is the partner's
