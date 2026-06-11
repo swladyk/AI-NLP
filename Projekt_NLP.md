@@ -5,11 +5,11 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.16.4
+      jupytext_version: 1.19.2
   kernelspec:
-    display_name: Python (NLP Project)
+    display_name: Python 3
     language: python
-    name: nlp-project
+    name: python3
 ---
 
 # Combined Review Analysis System: Summarization, Keyword Extraction & Sentiment Analysis
@@ -18,7 +18,7 @@ jupyter:
 
 **Authors:**
 - *Part A — Text Summarization & Keyword Extraction:* Stanisław
-- *Part B — Sentiment Analysis:* Partner
+- *Part B — Sentiment Analysis:* Magdalena
 
 **Dataset:** Amazon Fine Food Reviews (SNAP)
 
@@ -103,9 +103,24 @@ signal of what reviewers care about.
 
 ### 2.3 Sentiment Analysis
 
-> **TODO (Partner):** Opisać przykłady naukowe i biznesowe dla analizy
-> sentymentu (np. lexicon-based VADER, modele transformerowe; zastosowania:
-> monitoring marki, analiza opinii klientów, finanse). *Placeholder.*
+**Science.** Sentiment analysis is one of the core NLP tasks, which aims to
+classify text into positive, negative or neutral categories or assign a
+continuous polarity score. Earlier approaches were mostly *lexicon based*,
+with examples of **VADER** (Hutto & Gilbert, 2014) or **SentiWordNet** 
+(Baccianella et al., LREC 2010) being some of the most commonly used. With
+the evolution of deep learning, *transformer models* became the new standard.
+Models such as **BERT** (Devlin et al., 2019), **RoBERTa** (Liu et al., 2019)
+and **DistilBERT** (Sanh et al., 2019) significantly improved sentiment classification
+performance by leveraging *bidirectional contextual representations*. 
+These models better capture negation, sarcasm, and subtle distinctions between 
+neutral and weakly polar expressions.
+
+**Practice.** Sentiment analysis is widely used in business for *brand monitoring*,
+to notice perception shifts, *customer review analysis*, generating *product ratings*
+(aggregating review scores). It can be used as a signal in *algorythmic trading* 
+or prioritizing tickets in *customer support*. In our case, product reviews,
+it provides a compact, numerical represantation of user opinions and a metric
+that could be tracked with time to detect trends and shifts in opinions.
 
 ---
 
@@ -159,10 +174,23 @@ parameters:
 
 ### 3.3 VADER (Sentiment Analysis)
 
-> **TODO (Partner):** Opisać bibliotekę `vaderSentiment` —
-> `SentimentIntensityAnalyzer`, metoda `polarity_scores()` (klucze `neg`, `neu`,
-> `pos`, `compound`) oraz typowy próg `compound >= 0.05` dla klasy pozytywnej.
-> *Placeholder.*
+[vaderSentiment](https://github.com/cjhutto/vadersentiment) library implements
+the Valence Aware Dictionary and sEntiment Reasoner model, which is a lexicon based
+sentiment analysis tool designed for social media, short, informal texts.
+Core class is **`SentimentIntensityAnalyzer`** with the **`polarity_scores()`** method.
+
+This function returns a dictionary with four components:
+- **`neg`** — proportion of the text classified as negative sentiment
+- **`neu`** — proportion of neutral sentiment
+- **`pos`** — proportion of positive sentiment
+- **`compound`** — a normalized, weighted composite score in the range −1,1, 
+representing overall sentiment intensity
+
+**`compound`** is most commonly used for classifications and assigning labels. 
+Standard thresholds:
+- *positive sentiment*: **`compound score`** >= 0.05
+- *neutral sentiment*: (**`compound score`** > -0.05) and (**`compound score`** < 0.05)
+- *negative sentiment*: **`compound score`** <= -0.05
 
 ---
 
@@ -560,31 +588,181 @@ print("Open it in Excel: columns are original_text | bart_summary | keywords for
 
 ### Part B — Sentiment Analysis *(Partner)*
 
-> This section is a **scaffold**. The implementation is the partner's
-> responsibility.
-
 #### 6.4 Sentiment Analysis with VADER
 
+
+We load VADER from the vaderSentiment library. It is used to calculate the compound score for every review.
+
 ```python
-# TODO: Implementacja Sentiment Analysis z VADER
-# - zaimportować SentimentIntensityAnalyzer z vaderSentiment
-# - policzyć polarity_scores() (compound) dla każdej recenzji w df_sample
-# - zmapować compound -> etykieta (positive / negative / neutral)
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+analyser = SentimentIntensityAnalyzer()
+
+# Map VADER compound score to sentiment label using standard thresholds.
+
+def get_sentiment(text):
+    """Map VADER compound score to a sentiment label.
+    Thresholds:
+      compound >= 0.4   -> positive
+      compound <= -0.4  -> negative
+      otherwise         -> neutral
+    """
+    scores = analyser.polarity_scores(text)
+    compound = scores["compound"]
+    if compound >= 0.4:
+        return "positive"
+    elif compound <= -0.4:
+        return "negative"
+    else:
+        return "neutral"
 ```
 
 ```python
-# TODO: Stworzyć "ground truth" z kolumny 'Score'
-# (np. Score >= 4 -> positive, Score <= 2 -> negative) i porównać z VADER
+# Show sentiment scores and labels for the same example reviews we used above to illustrate how VADER works in practice. 
+# This gives us a qualitative feel for the sentiment analysis step before we apply it to the whole dataset.
+
+N_EXAMPLES = 4
+examples = df_sample.sample(n=N_EXAMPLES, random_state=RANDOM_STATE).reset_index(drop=True)
+
+for i, row in examples.iterrows():
+    text = row["Text"]
+    sentiment_scores = analyser.polarity_scores(text)
+    sentiment_label = get_sentiment(text)
+
+
+    print("=" * 100)
+    print(f"EXAMPLE {i + 1}  |  Score: {row['Score']}")
+    print("-" * 100)
+    print("ORIGINAL (truncated to 600 chars for display):")
+    print(text[:600] + ("..." if len(text) > 600 else ""))
+    print("-" * 100)
+    print("SENTIMENT SCORES AND LABEL:")
+    print(sentiment_scores)
+    print(sentiment_label)
+```
+
+```python
+# Compute sentiment scores and labels for the entire working sample, store in a new DataFrame
+
+sentiments = []
+
+for i, row in df_sample.iterrows():
+    text = row["Text"]
+    score = analyser.polarity_scores(text)
+    sentiment_score = score["compound"]
+    sentiment_label = get_sentiment(text)
+    
+    sentiments.append({
+        "id": int(row.name),
+        "score": int(row["Score"]),
+        "sentiment_score": sentiment_score,
+        "sentiment_label": sentiment_label,
+    })
+    print(f"Processed {i + 1}/{len(df_sample)}")
+
+sentiments_df = pd.DataFrame(sentiments)
+sentiments_df.head()
+```
+
+```python
+# Plot histogram of VADER compound scores to see the overall sentiment distribution in the working sample.
+plt.figure(figsize=(8, 5))
+sns.histplot(sentiments_df["sentiment_score"], bins=20, kde=True, color="#4C72B0")
+plt.title("Distribution of VADER Compound Sentiment Scores")
+plt.xlabel("Compound Sentiment Score")
+plt.ylabel("Number of Reviews")
+plt.axvline(0.4, color="green", linestyle="--", label="Positive Threshold (0.4)")
+plt.axvline(-0.4, color="red", linestyle="--", label="Negative Threshold (-0.4)")
+plt.legend()
+plt.show()
+```
+
+To compare VADER labels with actual scores, we assign labels to them, with 3 being a neutral review, everything above being positive and everything below being negative.
+
+```python
+# Map the original star rating to a sentiment label for comparison with VADER
+
+def score_to_sentiment(score):
+    """Map the original star rating to a sentiment label.
+    Common thresholds:
+      Score >= 4  -> positive
+      Score <= 2  -> negative
+      otherwise   -> neutral
+    """
+    if score >= 4:
+        return "positive"
+    elif score <= 2:
+        return "negative"
+    else:
+        return "neutral"
+```
+
+```python
+# Add a column with the ground truth sentiment based on the original star rating
+
+sentiments_df["ground_truth"] = sentiments_df["score"].apply(score_to_sentiment)
+sentiments_df.head()
+```
+
+#### 6.4.1 Export results to CSV
+
+To make comparison easier, like in Part A, the results are exported to a CSV. Original text is ommited, as it is not necessary for comparison.
+
+```python
+import csv
+
+# Write the Excel-friendly CSV next to the notebook.
+OUTPUT_CSV = "sentiment_analysis_results.csv"
+
+sentiments_df.to_csv(
+    OUTPUT_CSV,
+    index=False,
+    encoding="utf-8-sig",   # makes Excel render accents/special chars correctly
+    quoting=csv.QUOTE_ALL,  # wrap every field so commas/newlines stay inside cells
+    lineterminator="\n",
+)
+
+print(f"Saved {len(sentiments_df)} rows to '{OUTPUT_CSV}'.")
+print("Open it in Excel: columns are id | score | sentiment_score | sentiment_label | ground_truth for easy comparison.")
 ```
 
 #### 6.5 Evaluation metrics
 
+
+We compare the results of the VADER sentiment analysis with the labels assigned to actual scores using standard evaluation metrics like accuracy, F1 score and visualizing the results with a confusion matrix.
+
 ```python
-# TODO: Metryki Accuracy, F1, Confusion Matrix
-# - sklearn.metrics: accuracy_score, f1_score, classification_report
-# - sklearn.metrics: confusion_matrix + seaborn heatmap do wizualizacji
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
+
+# Calculate accuracy and F1 score
+accuracy = accuracy_score(sentiments_df["ground_truth"], sentiments_df["sentiment_label"])
+f1 = f1_score(sentiments_df["ground_truth"], sentiments_df["sentiment_label"], average="weighted")
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Weighted F1 Score: {f1:.4f}")
 ```
 
+On first glance the accuracy seems satisfactory.
+
+```python
+# Classification report (precision, recall, F1 per class)
+report = classification_report(sentiments_df["ground_truth"], sentiments_df["sentiment_label"])
+print("Classification Report:\n", report)
+```
+
+```python
+# Generate confusion matrix
+cm = confusion_matrix(sentiments_df["ground_truth"], sentiments_df["sentiment_label"], labels=["positive", "neutral", "negative"])
+cm_df = pd.DataFrame(cm, index=["GT Positive", "GT Neutral", "GT Negative"], columns=["Pred Positive", "Pred Neutral", "Pred Negative"])
+plt.figure(figsize=(6, 4))
+sns.heatmap(cm_df, annot=True, fmt="d", cmap="Blues")
+plt.title("Confusion Matrix")
+plt.ylabel("Ground Truth")
+plt.xlabel("Predicted Label")
+plt.show()
+```
+
+Looking into the classification report and confusion matrix it can be seen that the relatively high accuracy is mostly driven by the positive class, with both negative and neutral classes being mislabelled much more frequently. This is the result of factors such as the small numbers of actual neutral and negative reviews, set standard VADER thresholds and values assigned to words inside the VADER lexicon.
+
+<!-- #region -->
 ---
 
 ## 7. Strengths and Weaknesses
@@ -639,6 +817,30 @@ Extraction). *(Part B / sentiment strengths & weaknesses — TODO partner.)*
 - **No built-in deduplication unless MMR is enabled** — without it, returned
   keyphrases can be near-duplicates ("great coffee", "coffee great").
 
+
+### 7.3 Sentiment Analysis (VADER)
+
+**Strengths**
+
+- **Easy to set up and quick:** VADER requires no training data and using it
+  doesn't require a lot of fine-tuning.Because it is a lexicon based model, it 
+  produces results very quickly, doesn't require a GPU and can be used on large datasets
+  efficiently.
+- **Interpretable results:** the model provides results such as positive, negative,
+  neutral and compound score, making it easy to understand why a given label was
+  assigned, unlike many black-box models.
+- **Designed for social media:** VADER was specifically designed for social media 
+  text and using weights can interpret elements such as capitalization, 
+  emojis, slang, abbreviations or punctuation.
+
+**Weaknesses**
+
+- **Weak handling of sarcasm and irony:** VADER handles some negation patterns and 
+  intensifiers but may misclassify complex sarcasm or context-dependent irony.
+- **Limited understanding of context and implicit sentiment:** VADER relies heavily 
+  on sentiment-bearing words. It may miss subtle negativity and as a lexicon based model
+  does not have true understanding of context.
+
 ---
 
 ## 8. Good Practices & Insights
@@ -672,6 +874,28 @@ Practical lessons from implementing the Part-A methods:
    hallucinations; reading a handful of original-vs-summary pairs (as we do in
    §6.1) is essential to catch unfaithful outputs.
 
+Practical lessons from implementing the Part-B methods:
+
+1. **Again, filter by length before analysing sentiment.** VADER is designed for short,
+   concise social media texts. It may struggle with long paragraphs and it works best
+   on sentence-level analysis. Therefore keeping texts a few sentences long is
+   an optimal solution.
+2. **Don't clean up the text too much.** While some cleaning up might be necessary,
+   the model relies on elements like punctuation, emojis or case-sensitivity
+   to assign scores and change weights of particular words.
+3. **Consider your domain and language.** VADER was designed for social media,
+   informal texts such as tweets. It often contains explicit emotional language.
+   Therefore for more formal or business texts it might be better to use a different 
+   model. It is also based on the english language only, although there are
+   experimental versions for other languages as well as video or image analysis.
+4. **Tune the sentiment thresholds.** Depending on the dataset, it might be useful
+   to use thresholds different from the standard ones. Look at the classification
+   report, confusion matrix and experiment with different values.
+5. **Use VADER as a baseline.** VADER is often a strong baseline because it is
+   simple and explainable. However it doesn't capture nuance and context,
+   so it might be used for comparison with other machine learning methods or
+   more sophisticated models.
+
 ---
 
 ## 9. Conclusion
@@ -684,3 +908,4 @@ forms a complete pipeline for automated, structured review analysis. The
 qualitative evaluation confirms that the methods are effective while also
 exposing their limitations (hallucination, compute cost), which we document for
 honest, reproducible academic reporting.
+<!-- #endregion -->
